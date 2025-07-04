@@ -17,7 +17,15 @@ app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
 // SQLite Setup
-const db = new sqlite3.Database('./backend/db.sqlite3');
+const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'db.sqlite3');
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Error opening DB:', err);
+  } else {
+    console.log('✅ Database opened at:', dbPath);
+  }
+});
+
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
