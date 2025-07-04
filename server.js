@@ -117,7 +117,11 @@ app.get('/api/files/download/:id', (req, res) => {
   });
 });
 
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+});
+app.get('/', (req, res) => {
+  res.send('✅ TREDT Union File Management Backend is Live');
 });
