@@ -28,7 +28,7 @@ app.use(express.json());
 const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'db.sqlite3');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Error opening DB:', err);
+    console.error('❌ Error opening DB:', err);
   } else {
     console.log('✅ Database opened at:', dbPath);
   }
@@ -46,7 +46,7 @@ db.serialize(() => {
   )`);
 });
 
-// Multer Setup (store in temp for upload)
+// Multer Setup (temp storage)
 const upload = multer({ dest: 'temp/' });
 
 // Email Setup
@@ -61,9 +61,8 @@ const transporter = nodemailer.createTransport({
 // API: Upload File to Supabase Bucket
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   const { title, description, tags, type } = req.body;
-
-  // 🔐 Check secret token
   const clientSecret = req.headers['x-upload-secret'];
+
   if (clientSecret !== process.env.UPLOAD_SECRET) {
     return res.status(403).json({ error: 'Unauthorized uploader' });
   }
@@ -72,7 +71,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   const buffer = fs.readFileSync(file.path);
   const pathInBucket = `${type}/${Date.now()}_${file.originalname}`;
 
-  const { data, error } = await supabase.storage
+  const { error } = await supabase.storage
     .from(BUCKET)
     .upload(pathInBucket, buffer, {
       contentType: file.mimetype
@@ -122,27 +121,27 @@ app.post('/api/files/request', (req, res) => {
     text: `User ${requester} requested access to private file: ${filename}\nReason: ${reason}`
   };
 
-  transporter.sendMail(mailOptions, (error, info) => {
+  transporter.sendMail(mailOptions, (error) => {
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: 'Request sent successfully' });
   });
 });
 
-// API: Download File - Redirect to Supabase URL
+// API: Download File (redirect to Supabase public URL)
 app.get('/api/files/download/:id', (req, res) => {
   const id = req.params.id;
   db.get(`SELECT * FROM files WHERE id = ?`, [id], (err, row) => {
     if (err || !row) return res.status(404).json({ error: 'File not found' });
-    res.redirect(row.filename); // filename = public URL
+    res.redirect(row.filename);
   });
 });
 
-// Home Route
+// Home
 app.get('/', (req, res) => {
   res.send('✅ TREDT Union File Management Backend is Live');
 });
 
-// Start Server
+// Start
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
