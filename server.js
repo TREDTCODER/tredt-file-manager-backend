@@ -125,3 +125,23 @@ app.listen(PORT, () => {
 app.get('/', (req, res) => {
   res.send('✅ TREDT Union File Management Backend is Live');
 });
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  const { title, description, tags, type } = req.body;
+
+  // 🔐 Check secret token
+  const clientSecret = req.headers['x-upload-secret'];
+  if (clientSecret !== process.env.UPLOAD_SECRET) {
+    return res.status(403).json({ error: 'Unauthorized uploader' });
+  }
+
+  const filename = req.file.filename;
+
+  db.run(
+    `INSERT INTO files (title, description, filename, tags, type) VALUES (?, ?, ?, ?, ?)`,
+    [title, description, filename, tags, type],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'File uploaded', fileId: this.lastID });
+    }
+  );
+});
