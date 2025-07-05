@@ -38,6 +38,12 @@ db.serialize(() => {
   )`);
 });
 
+const fs = require('fs');
+const publicDir = path.join(__dirname, 'uploads/public');
+const privateDir = path.join(__dirname, 'uploads/private');
+fs.mkdirSync(publicDir, { recursive: true });
+fs.mkdirSync(privateDir, { recursive: true });
+
 // Multer Setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
