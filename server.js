@@ -1,4 +1,4 @@
-// server.js – TREDT Union File Management System Backend
+// server.js – TREDT Union File Management System Backend (Supabase Version)
 
 const express = require('express');
 const multer = require('multer');
@@ -6,15 +6,23 @@ const nodemailer = require('nodemailer');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Supabase Setup
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const BUCKET = 'tredt-files';
+
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
 
 // SQLite Setup
 const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'db.sqlite3');
@@ -38,23 +46,8 @@ db.serialize(() => {
   )`);
 });
 
-const fs = require('fs');
-const publicDir = path.join(__dirname, 'uploads/public');
-const privateDir = path.join(__dirname, 'uploads/private');
-fs.mkdirSync(publicDir, { recursive: true });
-fs.mkdirSync(privateDir, { recursive: true });
-
-// Multer Setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const type = req.body.type === 'private' ? 'uploads/private' : 'uploads/public';
-    cb(null, type);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}_${file.originalname}`);
-  }
-});
-const upload = multer({ storage });
+// Multer Setup (store in temp for upload)
+const upload = multer({ dest: 'temp/' });
 
 // Email Setup
 const transporter = nodemailer.createTransport({
@@ -65,17 +58,40 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// API: Upload File
-app.post('/api/upload', upload.single('file'), (req, res) => {
+// API: Upload File to Supabase Bucket
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   const { title, description, tags, type } = req.body;
-  const filename = req.file.filename;
 
-  db.run(`INSERT INTO files (title, description, filename, tags, type) VALUES (?, ?, ?, ?, ?)`,
-    [title, description, filename, tags, type],
+  // 🔐 Check secret token
+  const clientSecret = req.headers['x-upload-secret'];
+  if (clientSecret !== process.env.UPLOAD_SECRET) {
+    return res.status(403).json({ error: 'Unauthorized uploader' });
+  }
+
+  const file = req.file;
+  const buffer = fs.readFileSync(file.path);
+  const pathInBucket = `${type}/${Date.now()}_${file.originalname}`;
+
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .upload(pathInBucket, buffer, {
+      contentType: file.mimetype
+    });
+
+  fs.unlinkSync(file.path);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${pathInBucket}`;
+
+  db.run(
+    `INSERT INTO files (title, description, filename, tags, type) VALUES (?, ?, ?, ?, ?)`,
+    [title, description, publicUrl, tags, type],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'File uploaded', fileId: this.lastID });
-    });
+    }
+  );
 });
 
 // API: Get Public Files
@@ -112,42 +128,21 @@ app.post('/api/files/request', (req, res) => {
   });
 });
 
-// API: Download File
+// API: Download File - Redirect to Supabase URL
 app.get('/api/files/download/:id', (req, res) => {
   const id = req.params.id;
   db.get(`SELECT * FROM files WHERE id = ?`, [id], (err, row) => {
     if (err || !row) return res.status(404).json({ error: 'File not found' });
-
-    const filepath = path.join(__dirname, 'uploads', row.type, row.filename);
-    res.download(filepath);
+    res.redirect(row.filename); // filename = public URL
   });
 });
 
+// Home Route
+app.get('/', (req, res) => {
+  res.send('✅ TREDT Union File Management Backend is Live');
+});
 
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-});
-app.get('/', (req, res) => {
-  res.send('✅ TREDT Union File Management Backend is Live');
-});
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  const { title, description, tags, type } = req.body;
-
-  // 🔐 Check secret token
-  const clientSecret = req.headers['x-upload-secret'];
-  if (clientSecret !== process.env.UPLOAD_SECRET) {
-    return res.status(403).json({ error: 'Unauthorized uploader' });
-  }
-
-  const filename = req.file.filename;
-
-  db.run(
-    `INSERT INTO files (title, description, filename, tags, type) VALUES (?, ?, ?, ?, ?)`,
-    [title, description, filename, tags, type],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'File uploaded', fileId: this.lastID });
-    }
-  );
 });
