@@ -145,3 +145,24 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
+
+// API: Delete File by ID
+app.delete('/api/files/:id', async (req, res) => {
+  const fileId = req.params.id;
+
+  db.get(`SELECT * FROM files WHERE id = ?`, [fileId], async (err, row) => {
+    if (err || !row) return res.status(404).json({ error: 'File not found' });
+
+    // Delete from Supabase
+    const supabasePath = row.filename.split('/storage/v1/object/public/tredt-files/')[1];
+    const { error: delError } = await supabase.storage.from('tredt-files').remove([supabasePath]);
+
+    if (delError) return res.status(500).json({ error: delError.message });
+
+    // Remove from DB
+    db.run(`DELETE FROM files WHERE id = ?`, [fileId], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'File deleted successfully' });
+    });
+  });
+});
