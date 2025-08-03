@@ -44,6 +44,15 @@ db.serialize(() => {
     type TEXT CHECK(type IN ('public', 'private')),
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL,
+    requester TEXT NOT NULL,
+    reason TEXT,
+    requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (file_id) REFERENCES files(id)
+  )`);
 });
 
 // Multer Setup (temp storage)
@@ -61,38 +70,32 @@ const transporter = nodemailer.createTransport({
 });
 
 // API: Upload File to Supabase Bucket
-app.post('/api/upload', upload.single('file'), async (req, res) => {
-  const { title, description, tags, type } = req.body;
-  const clientSecret = req.headers['x-upload-secret'];
+app.post('/api/files/request', (req, res) => {
+  const { fileId, requester, reason } = req.body;
 
-  if (clientSecret !== process.env.UPLOAD_SECRET) {
-    return res.status(403).json({ error: 'Unauthorized uploader' });
-  }
+  db.get(`SELECT * FROM files WHERE id = ? AND type = 'private'`, [fileId], (err, fileRow) => {
+    if (err || !fileRow) return res.status(404).json({ error: 'Private file not found' });
 
-  const file = req.file;
-  const buffer = fs.readFileSync(file.path);
-  const pathInBucket = `${type}/${Date.now()}_${file.originalname}`;
+    const mailOptions = {
+      from: process.env.ADMIN_EMAIL,
+      to: process.env.ADMIN_EMAIL,
+      subject: '📥 TREDT Private File Request',
+      text: `🔒 User "${requester}" requested access to:\n\nFile: ${fileRow.title}\nID: ${fileId}\nReason: ${reason || 'N/A'}`
+    };
 
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(pathInBucket, buffer, {
-      contentType: file.mimetype
+    transporter.sendMail(mailOptions, (error) => {
+      if (error) return res.status(500).json({ error: error.message });
+
+      db.run(
+        `INSERT INTO requests (file_id, requester, reason) VALUES (?, ?, ?)`,
+        [fileId, requester, reason],
+        function (err) {
+          if (err) return res.status(500).json({ error: err.message });
+          res.json({ message: 'Request sent and logged', requestId: this.lastID });
+        }
+      );
     });
-
-  fs.unlinkSync(file.path);
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${pathInBucket}`;
-
-  db.run(
-    `INSERT INTO files (title, description, filename, tags, type) VALUES (?, ?, ?, ?, ?)`,
-    [title, description, publicUrl, tags, type],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'File uploaded', fileId: this.lastID });
-    }
-  );
+  });
 });
 
 // API: Get Public Files
