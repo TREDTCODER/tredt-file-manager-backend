@@ -51,7 +51,9 @@ const upload = multer({ dest: 'temp/' });
 
 // Email Setup
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // upgrade later with STARTTLS
   auth: {
     user: process.env.ADMIN_EMAIL,
     pass: process.env.ADMIN_PASS
